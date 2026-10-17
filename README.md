@@ -2,6 +2,31 @@
 
 Tableau de bord ESP8266 OLED et programmateur Wi-Fi autonome a quatre relais.
 
+## Apercu du tableau de bord
+
+Temperature, humidite de l'air, humidite du sol, graphiques et programmateur
+repliable des quatre relais.
+
+![Interface Grow Guardian avec mesures et programmateur](images/tableau-de-bord.png)
+
+## Materiel en images
+
+### Capteur d'humidite du sol YL-69
+
+Sonde resistive et module de lecture, utilises pour suivre l'humidite du sol.
+
+![Sonde d'humidite du sol YL-69 avec son module de lecture](images/capteur-sol-yl69.png)
+
+### Module Wi-Fi ESP8266 / ESP-01 a quatre relais
+
+Carte utilisee pour commander la lumiere, la ventilation, la pompe et une sortie optionnelle.
+
+![Carte ESP8266 a quatre relais avec reperes des connecteurs](images/module-esp8266-4-relais.png)
+
+Les annotations de cette capture concernent le firmware d'origine du module.
+Avec Grow Guardian, utiliser la configuration et les commandes decrites ci-dessous.
+Verifier la tension d'alimentation indiquee sur votre propre carte.
+
 ## Firmwares
 
 - `ESP8266_OLED_Hello_modif_OTA/` : tableau de bord, OLED, DHT22, sonde de sol
