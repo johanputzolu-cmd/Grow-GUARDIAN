@@ -1,172 +1,444 @@
 # Grow Guardian
 
-Tableau de bord ESP8266 OLED et programmateur Wi-Fi autonome a quatre relais.
+Systeme de suivi et de commande sur reseau local, compose d'un tableau de bord
+ESP8266 avec ecran OLED et d'un programmateur autonome ESP8266 a quatre relais.
+L'interface web est en francais, adaptee aux ordinateurs et aux mobiles.
 
-## Apercu du tableau de bord
+**Sources et captures actualisees le 18 octobre 2026.** Ce depot contient les
+fonctions decrites ci-dessous : programmateur v3, conditions, reprise apres
+coupure, suivi des dates, SEED BANK et previsions informatives.
+Les valeurs visibles dans les captures proviennent de l'installation de
+demonstration : elles ne constituent pas des recommandations de culture.
 
-Temperature, humidite de l'air, humidite du sol, graphiques et programmateur
-repliable des quatre relais.
+## Sommaire
 
-![Interface Grow Guardian avec mesures et programmateur](images/tableau-de-bord.png)
+- [Vue d'ensemble](#vue-densemble)
+- [Mesures et voyants de connexion](#mesures-et-voyants-de-connexion)
+- [Phase suivie et dates previsionnelles](#phase-suivie-et-dates-previsionnelles)
+- [SEED BANK et catalogue CSV](#seed-bank-et-catalogue-csv)
+- [Graphiques, arrosages et min/max](#graphiques-arrosages-et-minmax)
+- [Programmateur a quatre relais](#programmateur-a-quatre-relais)
+- [Conditions sur les capteurs](#conditions-sur-les-capteurs)
+- [Reprise apres coupure](#reprise-apres-coupure)
+- [Ecran OLED et boutons](#ecran-oled-et-boutons)
+- [Materiel et branchements](#materiel-et-branchements)
+- [Installation et mises a jour](#installation-et-mises-a-jour)
+- [API et stockage](#api-et-stockage)
+- [Tests](#tests)
+- [Limites et precautions](#limites-et-precautions)
 
-### Programmateur hebdomadaire
+## Vue d'ensemble
 
-Chaque fonction (lumiere, ventilation, pompe et option) dispose de quatre
-plages independantes, presentees sous forme de cartes depliables/repliables.
-Chaque plage propose ses jours de la semaine, ses horaires et un mode continu
-ou cyclique. L'heure du relais reste visible dans l'en-tete.
+![Tableau de bord actuel : voyants Dashboard et Relai, cartes repliables et mesures](images/tableau-de-bord.png)
 
-![Programmateur avec quatre fonctions, plages repliables et marche temporaire](images/programmateur-hebdomadaire.png)
+```text
+DHT22 + sonde de sol + OLED
+             |
+     ESP8266 Dashboard <--- navigateur sur le Wi-Fi local
+             |
+       HTTP + decouverte mDNS
+             |
+     ESP8266 Relai (programmateur autonome)
+             |
+       UART 115200 bauds
+             |
+     Controleur physique des quatre relais
+```
 
+| Element | Fonctions |
+| --- | --- |
+| Dashboard | Mesures, OLED, interface web, historiques, arrosages, records, dates, catalogue et mises a jour OTA |
+| Relai | Execution autonome des plages, modes forces, conditions, temporisations et reprise apres coupure |
+| Navigateur | Affichage et edition des reglages ; inutile pour executer les programmes deja enregistres |
+
+Le Dashboard decouvre le module `grow-relay` par mDNS. Il transmet les mesures
+au relais environ toutes les cinq secondes, meme sans navigateur ouvert.
+Les reglages du programmateur sont executes sur le relais, pas sur le PC.
+
+## Mesures et voyants de connexion
+
+- Temperature et humidite de l'air mesurees par le DHT22.
+- Humidite relative du sol issue de l'entree analogique A0, avec pourcentage,
+  barre coloree, etat du sol et valeur brute.
+- Actualisation du tableau toutes les deux secondes ; etat des relais toutes
+  les cinq secondes, avec horloge et comptes a rebours actualises chaque seconde.
+- Deux voyants independants **Dashboard** et **Relai** : vert lorsque le dernier
+  echange indique une connexion active, gris sinon. L'etat est aussi accessible
+  dans le libelle et l'infobulle ; aucune adresse IP n'est affichee dans l'interface.
+- Alerte visuelle lors du passage d'un etat connu du sol vers **Sec**.
+- Les erreurs de lecture, de reseau et de stockage sont signalees explicitement.
+
+Les cartes **Phase suivie**, **SEED BANK** et **Programmateur** sont repliables.
+Les titres utilisent le meme vert. Les cartes de mesure ouvrent leur historique.
+L'animation du plant propose de 1 a 8 etages, memorises dans le navigateur ;
+elle est decorative et ne mesure pas la croissance reelle.
+
+## Phase suivie et dates previsionnelles
+
+![Carte Phase suivie deployee : J+, jours restants et passage en floraison previsionnel](images/phase-suivie.png)
+
+La carte est fermee par defaut. Cliquer sur **Phase suivie** pour afficher :
+
+1. La date de germination, obligatoire, et la date reelle de passage en floraison,
+   facultative, puis **Enregistrer les dates**.
+2. Les compteurs **J+ depuis germination** et **J+ depuis floraison**.
+3. Le choix **Graine suivie**, parmi les fiches SEED BANK.
+4. Les jours restants theoriques de croissance et de floraison.
+5. La date previsionnelle du passage en floraison.
+
+Les dates sont sauvegardees dans LittleFS sur l'ESP et partagees entre les
+navigateurs. Le choix de la graine est memorise uniquement dans le navigateur
+utilise. **Actualiser les fiches** recharge les noms et les durees apres edition
+du catalogue.
+
+| Affichage | Calcul |
+| --- | --- |
+| J+ germination | Jours calendaires ecoules depuis la germination |
+| J+ floraison | Jours calendaires ecoules depuis le passage reel en floraison |
+| Croissance restante | Maximum de 0 et (duree de croissance de la fiche - J+ germination) |
+| Floraison restante | Maximum de 0 et (duree de floraison de la fiche - J+ floraison) |
+| Passage en floraison previsionnel | Date de germination + duree de croissance de la fiche |
+
+**Exemple de la capture :** germination le 08/10/2026, croissance indicative de
+40 jours et floraison indicative de 50 jours. Au 18/10/2026 : **J+10**,
+**30 jours de croissance restants theoriques** et passage previsionnel au
+**17/11/2026**. Les 50 jours ne servent pas a determiner le debut de floraison :
+ils sont decomptes depuis la date reelle lorsqu'elle est renseignee.
+
+Le jour de depart est J+0. Les compteurs suivent le calendrier de Paris,
+y compris les changements ete/hiver. Sans heure synchronisee, le compteur
+est indisponible ; une prevision basee sur deux valeurs fixes reste calculable.
+Les dates futures, durees absentes, erreurs de stockage ou fiches non chargees
+ont des messages dedies. Une duree de 0 reste distincte d'une valeur vide.
+
+La floraison ne peut pas preceder la germination. Les dates saisissables vont
+de 1970 a 2099. Une prevision **ne renseigne jamais la date reelle**, ne change
+aucune phase et ne commande aucun relais. Le selecteur manuel
+Croissance/Floraison a ete retire.
+
+## SEED BANK et catalogue CSV
+
+![Catalogue SEED BANK, partage CSV et formulaire de fiche](images/seed-bank.png)
+
+La carte du Dashboard ouvre `/seed-bank`, catalogue personnel de **huit fiches
+maximum**. Chaque fiche comporte :
+
+- un nom, obligatoire, limite a 64 octets UTF-8 ;
+- une variete / description, limitee a 256 octets UTF-8 ;
+- un temps de croissance indicatif ;
+- un temps de floraison indicatif.
+
+Les durees sont facultatives : entier de 0 a 9999 jours, ou champ vide.
+Les fiches peuvent etre ajoutees, modifiees et supprimees avec confirmation.
+Elles sont conservees sur l'ESP ; un echec d'enregistrement conserve le brouillon.
+Les donnees affichees sont du texte, pas du HTML execute.
+
+### Exporter et importer
+
+- **Exporter le catalogue CSV** telecharge les fiches.
+- **Telecharger le modele vide** fournit les colonnes
+  `nom;variete;croissance_jours;floraison_jours`.
+- Le [modele CSV](seed-bank-modele.csv) est aussi inclus dans ce depot.
+- L'import montre un apercu avant confirmation du remplacement.
+- UTF-8, BOM, separateur point-virgule ou virgule, champs entre guillemets et
+  textes multilignes sont acceptes. Taille maximale : 16 Ko.
+- Les anciens CSV a cinq ou sept colonnes restent lisibles ; notes devient
+  variete, les anciens fournisseur/lot/lien sont ignores.
+- L'export neutralise les cellules pouvant etre prises pour des formules ;
+  l'importeur retire ce prefixe lors du retour.
+
+**L'import remplace toutes les fiches.** Exporter une sauvegarde avant de
+continuer. Un CSV contenant seulement l'en-tete vide le catalogue apres
+confirmation. Chaque fiche est sauvegardee atomiquement, mais pas l'import
+entier : une coupure peut produire un import partiel, signale comme tel.
+Actualiser la liste avant de reessayer. Les dates et les programmes restent
+independants de cet import.
+
+## Graphiques, arrosages et min/max
+
+![Historique combine, annotations d'arrosage et records min/max](images/graphiques-arrosages.png)
+
+- Historique individuel sur 24 heures depuis les cartes temperature, air et sol.
+- **Graphique des mesures** : courbes combinees et legende coloree.
+- Periodes proposees : 1 h, 3 h, 6 h, 12 h, 24 h, 1 jour et 1 mois.
+- Historique court : 288 echantillons, un point toutes les cinq minutes.
+- Historique mensuel : 720 echantillons, un point par heure.
+- Rechargement des graphiques ouverts toutes les 30 secondes.
+- Journal manuel d'arrosages avec date/heure et type : **simple** ou
+  **avec engrais**. Jusqu'a 256 evenements conserves et reperes sur le graphique.
+- Records min/max temperature, humidite de l'air et sol depuis le debut du suivi.
+- **Reset min/max** demande confirmation et ne supprime pas les historiques.
+
+Le journal est declaratif : enregistrer un arrosage n'actionne pas la pompe
+et ne prouve pas qu'un arrosage physique a eu lieu.
+Les historiques, evenements et records sont sauvegardes dans LittleFS.
+Les graphiques ont besoin d'une heure synchronisee et ne recreent pas les
+mesures qui n'ont pas ete enregistrees pendant une panne.
+
+## Programmateur a quatre relais
+
+![Programmateur de lumiere, ventilation, pompe et option](images/programmateur-hebdomadaire.png)
+
+Quatre fonctions : **Lumiere**, **Ventilation**, **Pompe** et **Option**.
+Chacune possede une affectation physique de relais 1 a 4 et trois modes :
+
+| Mode | Comportement |
+| --- | --- |
+| ON | Marche forcee |
+| OFF | Arret force |
+| PROG | Execution des plages et, si applicable, de la condition |
+
+Choisir un relais deja affecte echange les deux affectations.
+Modifier les champs ne suffit pas : cliquer **ON**, **PROG** ou **OFF**
+enregistre les reglages et active le mode choisi.
+Les brouillons et l'ouverture des plages sont preserves pendant l'actualisation.
+
+### Quatre plages hebdomadaires par fonction
+
+![Exemple de plage : jours, horaires, mode et commandes](images/plage-hebdomadaire.png)
+
+Chaque fonction a quatre plages repliables, soit **16 plages au total** :
+activation individuelle, jours de semaine, debut/fin, mode continu ou cyclique.
+Une plage active doit avoir au moins un jour selectionne.
+
+- Les jours correspondent au **debut** : dimanche 22:00-02:00 se termine lundi.
+- Debut = fin signifie 24 heures a compter du debut.
+- En continu, la demande dure toute la plage.
+- En cycles, marche pendant une duree, toutes les N minutes, intervalle de debut
+  a debut. Duree <= intervalle, de 1 a 1440 minutes.
+- Les cycles sont ancres au debut de la plage et coupes a sa fin.
 - Les plages se cumulent : un chevauchement ne provoque pas de faux arret.
-- Une plage nocturne appartient au jour de son debut ; debut = fin signifie 24 h.
-- Les comptes a rebours annoncent la prochaine activation ou le prochain arret.
-- Une marche temporaire peut forcer une sortie pendant 1 a 1440 minutes,
-  puis reprendre le mode ON/OFF/PROG enregistre.
-- Apres modification des plages, cliquer ON, PROG ou OFF pour enregistrer.
-  Les brouillons et l'ouverture des cartes sont conserves pendant l'actualisation.
+- Le compte a rebours indique la prochaine transition prevue.
+- L'heure du relais reste visible meme quand le programmateur est replie.
 
-### Conditions sur la temperature et l'humidite
+### Marche temporaire
 
-Une carte **Conditions** permet de choisir le relais physique a commander,
-un seuil de temperature et/ou d'humidite (air DHT22 ou sol YL-69).
-Les seuils peuvent etre combines avec **ET** ou **OU**.
+Une marche temporaire de **1 a 1440 minutes** force la sortie sans remplacer
+le mode sauvegarde. A son terme ou apres annulation, le mode precedent reprend
+au point courant du programme. Le compte a rebours annonce la fin du temporaire,
+pas forcement un arret si le programme demande encore ON.
 
-![Carte Conditions avec relais cible, seuils, choix air ou sol et mode de marche](images/conditions-capteurs.png)
+Une nouvelle marche exige une heure synchronisee ; son annulation reste possible
+sans heure. Enregistrer un programme annule son temporaire. Un echange de relais
+annule ceux des deux fonctions concernees.
 
-Deux actions sont possibles : maintenir la marche tant que le seuil est
-depasse, ou lancer une duree fixe lors du franchissement. Une marge de retour
-de 0,5 degre et 2 points d'humidite evite les oscillations. En mode minuteur,
-un depassement permanent ne relance pas la duree : un retour normal puis un
-nouveau franchissement sont necessaires.
+## Conditions sur les capteurs
 
-La fonction affectee au relais cible doit etre en **PROG** :
-les plages **OU** la condition peuvent demander la marche. OFF ignore la
-condition ; ON force la marche. Enregistrer les conditions ne change pas le mode.
-Les marches temporaires manuelles restent independantes.
+![Regle conditionnelle : relais, seuils, source air/sol, logique et action](images/conditions-capteurs.png)
 
-Le tableau transmet automatiquement les mesures au relais, meme sans navigateur
-ouvert. Apres 30 secondes sans mesure recente, seule la demande conditionnelle
-est annulee ; les plages continuent. Un defaut explicite sur un capteur requis
-annule cette demande immediatement. Les valeurs du sol sont relatives a la
-calibration, pas une teneur en eau absolue.
+Une regle globale, desactivee par defaut, peut viser un relais physique :
 
-### Reprise apres coupure de courant
+- seuil de temperature DHT22 et/ou seuil d'humidite ;
+- humidite de l'air DHT22 ou humidite relative du sol ;
+- combinaison **ET** / **OU** des seuils coches ;
+- declenchement strictement au-dessus du seuil ;
+- retour normal a seuil moins 0,5 degre ou moins 2 points d'humidite.
 
-Les programmes, affectations et modes sont conserves en EEPROM. Le dernier
-etat commande et les echeances temporaires sont sauvegardes dans LittleFS.
-Au redemarrage, les sorties sont restaurees, puis recalees sur les horaires
-reels des que NTP fournit l'heure de Paris. Les commandes d'etat sont renvoyees
-toutes les cinq secondes pour resynchroniser le controleur physique des relais,
-qui ne fournit pas d'accuse de reception.
+Deux actions : **maintenir tant que le seuil est depasse**, ou **duree fixe au
+franchissement** (1 a 1440 minutes). Le minuteur ne se prolonge pas a chaque
+mesure haute : il faut revenir a la normale puis franchir a nouveau le seuil.
+Ce mode minuteur exige une heure synchronisee.
 
-Les marches temporaires manuelles gardent leur heure de fin initiale :
-la duree de la panne est comptee. Un minuteur de condition ne reprend qu'avec
-une heure et des mesures valides, sans depasser sa fin initiale. Une condition
-ancienne ne suffit pas, a elle seule, a restaurer une marche sans nouvelles
-mesures ; sans mesures pendant les 30 premieres secondes, sa reprise est annulee.
+La fonction affectee au relais cible doit etre en **PROG**. Une plage **OU**
+la condition peut demander la marche. ON et OFF restent prioritaires, ainsi
+que les marches temporaires manuelles. Enregistrer une condition ne change
+pas le mode ; la regle suit le numero physique lors d'un echange d'affectation.
 
-**Attention : la politique de restauration du dernier etat peut remettre une
-pompe en marche avant synchronisation, meme si son horaire est termine.
-Sans heure synchronisee, cet etat peut rester actif.** Une horloge secourue
-par pile serait necessaire pour connaitre l'heure sans reseau apres coupure.
-Les etats affiches sont des commandes, pas une mesure des contacts physiques.
+Apres **30 secondes sans mesure recente**, la demande conditionnelle est annulee.
+Un defaut explicite sur un capteur requis l'annule immediatement ; les plages
+continuent. Les capteurs non selectionnes ne bloquent pas la regle.
+Un nouveau franchissement est necessaire pour relancer un minuteur annule.
+Enregistrer la regle reinitialise son etat ; elle peut demarrer immediatement
+si le seuil est deja depasse et que le relais est en PROG.
 
-### A propos de ces captures
+## Reprise apres coupure
 
-Captures de l'interface HTML en service, mises a jour le 18 octobre 2026.
-Les mesures, heures, affectations et reglages visibles sont des exemples de
-l'installation, pas des consignes universelles.
+Les modes, affectations, 16 plages et conditions sont conserves en EEPROM.
+LittleFS conserve les derniers etats commandes et les echeances temporaires,
+avec verification d'integrite et remplacement atomique.
 
-**Les captures et les sections ci-dessus decrivent la version installee sur
-les appareils. Les sources publiees dans ce depot n'ont pas encore ete
-synchronisees avec les evolutions hebdomadaires, conditions et reprise apres
-coupure.** Cette mise a jour concerne la documentation et les images uniquement.
+- ON/OFF sauvegardes reprennent directement.
+- Selon la sauvegarde valide, le dernier etat est restaure avant NTP, puis
+  PROG se recale sur l'heure reelle de Paris apres synchronisation.
+- Sans sauvegarde valide, PROG attend l'heure avec sorties arretees.
+- La panne compte dans les temporaires : leur heure de fin initiale est conservee.
+- Un minuteur conditionnel ne reprend qu'avec heure et mesures valides, sans
+  depasser son ancienne fin. Sans mesures dans les 30 premieres secondes,
+  sa reprise conditionnelle est annulee.
+- Les commandes d'etat des quatre sorties sont renvoyees toutes les cinq secondes
+  pour resynchroniser le controleur serie, sans relancer les temporisations.
+- Une sauvegarde corrompue est refusee ; un echec de montage apres initialisation
+  ne provoque pas un reformatage automatique.
 
-## Materiel en images
+**Attention : une pompe precedemment active peut redemarrer avant NTP,
+meme si sa plage est terminee. Sans heure synchronisee, cet etat peut durer.**
+L'ESP n'a pas d'horloge secourue pour connaitre la duree d'une coupure.
+Les etats affiches sont des commandes, pas une mesure des contacts physiques :
+le controleur UART ne fournit pas d'accuse de reception.
 
-### Capteur d'humidite du sol YL-69
+## Ecran OLED et boutons
 
-Sonde resistive et module de lecture, utilises pour suivre l'humidite du sol.
+OLED SSD1306 **128 x 64**, adresse I2C `0x3C`, caracteres taille 2 :
 
-![Sonde d'humidite du sol YL-69 avec son module de lecture](images/capteur-sol-yl69.png)
+- page air : temperature et humidite ;
+- page sol : pourcentage d'humidite du sol ;
+- compteur J+ depuis germination en bas des deux pages ;
+- aucun affichage d'adresse IP.
 
-### Module Wi-Fi ESP8266 / ESP-01 a quatre relais
+Un appui sur **FLASH / GPIO0** alterne les deux pages. Anti-rebond de 40 ms ;
+un appui maintenu ne fait pas defiler. La page air revient au redemarrage.
+**RESET** redemarre le module, il ne change pas de page.
+Ne pas maintenir FLASH pendant le reset ou la mise sous tension : GPIO0
+commande aussi l'entree en mode programmation.
 
-Carte utilisee pour commander la lumiere, la ventilation, la pompe et une sortie optionnelle.
+## Materiel et branchements
 
-![Carte ESP8266 a quatre relais avec reperes des connecteurs](images/module-esp8266-4-relais.png)
+| Composant Dashboard | Broche / configuration |
+| --- | --- |
+| ESP8266 NodeMCU | NodeMCU 1.0 / ESP-12E |
+| DHT22 DATA | D4 |
+| Module sol, sortie analogique | A0, respecter la tension admissible de la carte |
+| OLED SDA / SCL | GPIO5 / GPIO4 |
+| OLED | SSD1306, 128 x 64, `0x3C` |
+| Bouton FLASH | GPIO0 |
+| Module quatre relais | ESP-01, controleur serie UART 115200 bauds |
 
-Les annotations de cette capture concernent le firmware d'origine du module.
-Avec Grow Guardian, utiliser la configuration et les commandes decrites ci-dessous.
-Verifier la tension d'alimentation indiquee sur votre propre carte.
+Verifier le brochage sur sa propre carte. Les references de calibration par
+defaut du sol sont **900 sec / 300 humide**, a adapter dans les sources.
+Le pourcentage est relatif, pas une teneur en eau absolue. Les ADC 0/1023 sont
+invalides pour les conditions ; une valeur plausible figee ne permet pas de
+detecter tous les defauts de sonde.
 
-## Firmwares
+![Sonde YL-69 et module analogique](images/capteur-sol-yl69.png)
 
-- `ESP8266_OLED_Hello_modif_OTA/` : tableau de bord, OLED, DHT22, sonde de sol
-  YL-69, historiques, arrosages, min/max et mises a jour ArduinoOTA.
-  Carte Arduino : NodeMCU 1.0 (ESP-12E Module).
-- `ESP8266_4Relay/` : ESP-01 avec controleur serie de quatre relais,
-  protocole UART a 115200 bauds. Carte Arduino : Generic ESP8266 Module, flash 1 Mo.
-  Ce firmware relais ne dispose pas d'OTA.
+![Module ESP8266 a quatre relais](images/module-esp8266-4-relais.png)
 
-## Installation
+Les annotations sur la photo du module peuvent concerner son firmware d'origine.
+Verifier la tension et le protocole de la carte utilisee.
+Confier tout cablage secteur a une personne qualifiee ; ne pas tester des
+charges dangereuses sans protections et moyens de coupure adaptes.
 
-Installer le support ESP8266 3.1.2 dans Arduino IDE, puis les bibliotheques
-Adafruit GFX Library, Adafruit SSD1306 et DHT sensor library avec leurs dependances.
-Les bibliotheques Wi-Fi, HTTP, mDNS, LittleFS, EEPROM et ArduinoOTA sont fournies
-par le support ESP8266.
+## Installation et mises a jour
 
-Dans chaque dossier de sketch, copier `secrets.example.h` vers `secrets.h`
-et renseigner les identifiants du Wi-Fi. Choisir aussi un mot de passe OTA fort
-pour le tableau de bord. Ne jamais publier `secrets.h` : ce fichier est ignore
-par Git. Ouvrir le fichier `.ino` du dossier correspondant dans Arduino IDE.
+### Contenu du depot
 
-Effectuer le premier televersement par USB. Les mises a jour suivantes du
-tableau de bord peuvent utiliser son port reseau ArduinoOTA, annonce sous
-`grow-dashboard-ota`. Toujours conserver la fonctionnalite OTA dans le firmware
-envoye si les mises a jour sans cable doivent rester disponibles.
+| Dossier | Usage |
+| --- | --- |
+| [ESP8266_OLED_Hello_modif_OTA](ESP8266_OLED_Hello_modif_OTA/) | Dashboard avec ArduinoOTA |
+| [ESP8266_OLED_Hello](ESP8266_OLED_Hello/) | Variante Dashboard sans ArduinoOTA |
+| [ESP8266_4Relay](ESP8266_4Relay/) | Programmateur autonome v3 et modules Scheduler/Condition/Recovery |
+| [images](images/) | Captures de l'interface en service et photos du materiel |
 
-## Fonctionnement des sources actuellement publiees
+Installer le support **ESP8266 3.1.2** dans Arduino IDE et les bibliotheques
+**Adafruit GFX Library**, **Adafruit SSD1306**, **DHT sensor library** avec
+leurs dependances. Wi-Fi, HTTP, mDNS, LittleFS, EEPROM et OTA viennent du core.
 
-Le tableau de bord decouvre `grow-relay` par mDNS sur le reseau local et
-transmet les commandes aux relais. Lumiere, ventilation, pompe et option
-disposent chacune d'une affectation, d'un mode ON/PROG/OFF et d'un programme.
-Une nouvelle affectation echange les deux relais si le canal est deja utilise.
+Dans chaque dossier de sketch utilise, copier `secrets.example.h` vers
+`secrets.h`, renseigner le Wi-Fi et choisir un mot de passe OTA fort pour la
+version OTA. `secrets.h` est ignore par Git. **Aucun identifiant de
+l'installation n'est necessaire pour consulter ce depot.**
 
-En PROG : plage continue ou cycles avec duree et intervalle en minutes
-(intervalle de debut a debut). Debut = fin signifie 24 heures.
-Les cycles repartent a l'heure de debut chaque jour ; une marche est coupee
-a la fin de la plage. Les programmes sont sauvegardes en EEPROM et executes
-sur le module relais meme sans tableau de bord.
+Premier televersement par USB :
 
-L'heure du relais est synchronisee par NTP avec le fuseau Europe/Paris
-(regles CET/CEST). Sans synchronisation apres demarrage, PROG garde les
-sorties eteintes. L'API `/api/status` expose `timestamp` et `localTime`
-pour verifier l'heure effective.
+- Dashboard : **NodeMCU 1.0 (ESP-12E Module)** ;
+- Relai : **Generic ESP8266 Module**, flash 1 Mo, configuration de filesystem
+  compatible LittleFS pour conserver les donnees de reprise.
 
-Le tableau de bord utilise D4 pour le DHT22, A0 pour le sol et GPIO5/GPIO4
-pour SDA/SCL de l'OLED. Adapter les references de calibration du sol au materiel.
-Les historiques, arrosages et records du tableau de bord sont stockes dans LittleFS.
+Le Dashboard OTA est annonce comme `grow-dashboard-ota`. Les mises a jour
+reseau remplacent le firmware, pas les fiches et les dates, tant que le
+filesystem et son partitionnement ne sont pas effaces ou modifies.
+Le relais n'a **pas d'OTA** et se met a jour par liaison serie.
+Ne jamais effacer toute la flash pour une simple mise a jour.
 
-## Pistes d'amelioration
+Le v3 migre les anciens programmes v2 : ancienne plage en position 1 active
+tous les jours, autres plages desactivees. Le retour en v2 ne peut pas relire
+les reglages v3. Mettre a jour les deux appareils pour disposer de toutes
+les fonctions du programmateur.
 
-- Resumer chaque plage repliee : jours, horaires, type et etat actif.
-- Ajouter un bouton Enregistrer separe du choix ON/PROG/OFF.
-- Exporter et restaurer les programmes dans un fichier de sauvegarde.
-- Afficher une vue hebdomadaire et permettre de dupliquer une plage.
-- Journaliser les commandes, declenchements conditionnels et redemarrages.
-- Ajouter des notifications et une limite de marche maximale pour la pompe.
-- Ajouter une horloge RTC secourue pour fonctionner a l'heure sans Internet.
-- Proteger l'acces distant par une solution authentifiee, sans exposer HTTP/OTA.
+## API et stockage
 
-## Securite
+### Dashboard
 
-Le tableau de bord et l'API relais sont en HTTP sans authentification :
-ne pas les exposer directement a Internet. Utiliser un reseau de confiance
-et un acces distant securise. Ne pas rediriger le port OTA vers Internet.
-ArduinoOTA avec mot de passe n'est pas une liaison chiffree.
+| Methode / route | Fonction |
+| --- | --- |
+| `GET /` | Interface Dashboard |
+| `GET /api` | Mesures, horloge, dates et compteurs |
+| `POST /grow/dates` | `germination=AAAA-MM-JJ`, `flowering=AAAA-MM-JJ` ou vide |
+| `GET /seed-bank` | Interface catalogue |
+| `GET /seed-bank/api` | Capacite et fiches |
+| `POST /seed-bank/api` | Ajouter/modifier/supprimer une fiche |
+| `GET /history?range=24h` | Historique, evenements et records pour la periode |
+| `POST /watering` | Enregistrer un evenement d'arrosage manuel |
+| `POST /records/reset` | Reinitialiser les records min/max |
+| `GET /relay/status` | Statut du programmateur distant |
+| `POST /relay/program` | Sauvegarder mode, canal et plages |
+| `POST /relay/temporary` | Marche temporaire ou annulation |
+| `POST /relay/condition` | Sauvegarder les conditions |
 
-Tester les sorties avec les LED ou une charge basse tension adaptee.
-Le raccordement au secteur exige du materiel approprie et une installation
-realisee par une personne qualifiee.
+### Relai
+
+`GET /api/status` expose `schedulerVersion: 3`, `conditionVersion: 1`, l'heure,
+les quatre programmes, leurs transitions et l'etat de sauvegarde.
+Les routes POST sont `/api/program`, `/api/temporary`, `/api/condition` et
+`/api/sensors`. Les formulaires utilisent `application/x-www-form-urlencoded`.
+Les seuils POST sont en dixiemes, les durees en minutes.
+
+Voir le [guide technique du programmateur](ESP8266_4Relay/README.md#api-v3)
+pour les champs, masques hebdomadaires, priorites et cas de reprise.
+Les POST de commande ne sont pas relances automatiquement : apres une reponse
+perdue, consulter l'etat avant de retenter une marche temporaire.
+
+| Donnees | Emplacement |
+| --- | --- |
+| Historiques, arrosages, records, dates, fiches | LittleFS du Dashboard |
+| Modes, canaux, plages et conditions | EEPROM du Relai |
+| Etats et echeances pour reprise | LittleFS du Relai |
+| Graine choisie et etages decoratifs | Stockage local du navigateur |
+
+## Tests
+
+Les tests n'actionnent aucun relais et utilisent des simulations.
+Avec Node.js :
+
+```powershell
+node .\ESP8266_OLED_Hello_modif_OTA\tests\grow_dates_ui_test.js
+node .\ESP8266_OLED_Hello_modif_OTA\tests\seed_bank_ui_test.js
+node .\ESP8266_OLED_Hello_modif_OTA\tests\connection_status_ui_test.js
+```
+
+Ils couvrent les dates et brouillons, compteurs, previsions, changements de
+mois/annee/heure, catalogue, CSV, textes non interpretes, erreurs et voyants
+independants. Les variantes Dashboard sont comparees sur les surfaces partagees.
+
+Avec Python et un compilateur C++ natif :
+
+```powershell
+python .\ESP8266_4Relay\tests\run_tests.py --compiler "C:\chemin\vers\g++.exe"
+python .\ESP8266_OLED_Hello_modif_OTA\tests\oled_test.py
+```
+
+Le test OLED utilise actuellement `C:\msys64\mingw64\bin\g++.exe` ; adapter ce
+chemin dans le test si necessaire. Les tests C++ couvrent plages, nuit, cycles,
+chevauchements, migration, heure d'ete/hiver, conditions, defauts capteurs,
+sauvegarde atomique et reprise apres coupure. Le test OLED couvre les deux
+pages, le bouton et les dates sans materiel.
+
+Les captures de ce README ont ete realisees sans modifier les programmes,
+demarrer de sortie, importer de catalogue ni enregistrer de faux arrosage.
+
+## Limites et precautions
+
+- Reserver les appareils a un **reseau local de confiance**. Les interfaces
+  HTTP et leurs commandes ne sont pas authentifiees ; ne pas les exposer
+  directement sur Internet. Le mot de passe OTA protege uniquement l'OTA.
+- Les jours restants et dates previsionnelles sont des estimations arithmetiques,
+  pas une prediction biologique ni une regulation automatique.
+- Une mise a jour, une panne reseau ou un redemarrage peut interrompre
+  momentanement les echanges. Le relais execute ses reglages en autonomie.
+- Sans alimentation de secours, rien ne peut rester alimente pendant la panne.
+- Les dates/calculs en temps reel necessitent une heure NTP valide. La reprise
+  du dernier etat avant NTP impose les precautions decrites plus haut.
+- La sonde et les etats commandes ne remplacent ni un controle physique,
+  ni une securite materielle, ni une protection contre la marche a sec.
+- Les ameliorations possibles incluent sauvegarde globale des programmes,
+  journal des commandes, notifications et limites materielles de marche.
